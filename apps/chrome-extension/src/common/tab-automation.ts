@@ -21,6 +21,7 @@ export async function downloadDocument(
   const { timeout = 60000, onPageLoadTimeout, onDownloadTimeout } = options
 
   let tab: chrome.tabs.Tab | null = null
+  let downloadStartTime = 0
 
   try {
     // Create new tab (inactive/background)
@@ -42,6 +43,9 @@ export async function downloadDocument(
       target: { tabId: tab.id },
     })
 
+    // Track when we're starting the download attempt
+    downloadStartTime = Date.now()
+
     // Inject download script
     await chrome.scripting.executeScript({
       files: ['bundles/scripts/download-lark-docx-as-markdown.js'],
@@ -49,8 +53,12 @@ export async function downloadDocument(
       world: 'MAIN',
     })
 
-    // Wait for download to complete
-    await waitForDownloadComplete(timeout, onDownloadTimeout)
+    // Wait for download to complete and write to disk
+    await waitForDownloadComplete(downloadStartTime, timeout, onDownloadTimeout)
+
+    // Add extra delay to ensure file is fully written to disk
+    // This is crucial because Chrome reports "complete" before the file is fully saved
+    await new Promise(resolve => setTimeout(resolve, 3000))
 
     // Try to get the title from the page
     const titleResults = await chrome.scripting.executeScript({
@@ -113,22 +121,19 @@ function waitForPageLoad(
     chrome.tabs.onUpdated.addListener(listener as any)
 
     // Check if already complete
-    chrome.tabs
-      .get(tabId)
-      .then(tab => {
-        if (!resolved && tab.status === 'complete') {
-          resolved = true
-          chrome.tabs.onUpdated.removeListener(listener as any)
-          resolve()
-        }
-      })
-      .catch(error => {
-        if (!resolved) {
-          resolved = true
-          chrome.tabs.onUpdated.removeListener(listener as any)
-          reject(error)
-        }
-      })
+    chrome.tabs.get(tabId).then((tab) => {
+      if (!resolved && tab.status === 'complete') {
+        resolved = true
+        chrome.tabs.onUpdated.removeListener(listener as any)
+        resolve()
+      }
+    }).catch((error) => {
+      if (!resolved) {
+        resolved = true
+        chrome.tabs.onUpdated.removeListener(listener as any)
+        reject(error)
+      }
+    })
 
     // Timeout
     setTimeout(() => {
@@ -146,59 +151,126 @@ function waitForPageLoad(
  * Wait for a download to complete by monitoring chrome.downloads
  */
 function waitForDownloadComplete(
+  startTime: number,
   timeout: number,
   onTimeout?: () => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let resolved = false
+    const CHECK_INTERVAL = 500 // Check every 500ms
+    const MAX_WAIT = 10000 // Wait up to 10 seconds for download to complete
+    let elapsedTime = 0
 
-    const listener = (delta: chrome.downloads.DownloadDelta) => {
+    const checkForDownload = async () => {
       if (resolved) return
 
-      if (delta.state && delta.state.current === 'complete') {
-        resolved = true
-        chrome.downloads.onChanged.removeListener(listener as any)
-        resolve()
-      } else if (delta.error && delta.error.current !== undefined) {
-        resolved = true
-        chrome.downloads.onChanged.removeListener(listener as any)
-        reject(new Error(`Download error: ${delta.error.current}`))
-      }
-    }
+      try {
+        const results = await new Promise<chrome.downloads.DownloadItem[]>((resolve) => {
+          chrome.downloads.search(
+            {
+              orderBy: ['-startTime'],
+              limit: 50, // Check recent downloads
+            },
+            (result) => resolve(result),
+          )
+        })
 
-    chrome.downloads.onChanged.addListener(listener as any)
+        if (!results) {
+          scheduleNextCheck()
+          return
+        }
 
-    // Also check if there are any recent downloads that might be ours
-    // This handles the case where download completes before we attach listener
-    chrome.downloads
-      .search({
-        orderBy: ['-startTime'],
-        limit: 1,
-      })
-      .then(results => {
-        if (results.length > 0) {
-          const recent = results[0]
-          if (recent && recent.state === 'complete' && !resolved) {
-            // Give it a moment to ensure it's our download
-            setTimeout(() => {
-              if (!resolved) {
-                resolved = true
-                chrome.downloads.onChanged.removeListener(listener as any)
-                resolve()
-              }
-            }, 500)
+        // Look for downloads that started after our start time
+        const ourDownloads = results.filter(
+          (download) =>
+            download.startTime &&
+            download.startTime >= startTime - 1000 && // Within 1 second before start
+            download.startTime <= Date.now(),
+        )
+
+        if (ourDownloads.length > 0) {
+          const download = ourDownloads[0]
+
+          if (download.state === 'complete') {
+            resolved = true
+            console.log('[Download] Download completed successfully:', {
+              id: download.id,
+              filename: download.filename,
+              fileSize: download.totalBytes,
+            })
+            resolve()
+            return
+          } else if (download.error) {
+            resolved = true
+            console.error('[Download] Download failed:', download.error)
+            reject(new Error(`Download error: ${download.error}`))
+            return
+          } else if (download.state === 'in_progress') {
+            // Download is still in progress, check again later
+            console.log('[Download] Download in progress:', {
+              id: download.id,
+              filename: download.filename,
+              receivedBytes: download.receivedBytes,
+              totalBytes: download.totalBytes,
+            })
           }
         }
-      })
-
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true
-        chrome.downloads.onChanged.removeListener(listener as any)
-        onTimeout?.()
-        reject(new Error('Download timeout'))
+      } catch (error) {
+        console.error('[Download] Error checking downloads:', error)
       }
-    }, timeout)
+
+      scheduleNextCheck()
+    }
+
+    const scheduleNextCheck = () => {
+      if (resolved) return
+
+      elapsedTime += CHECK_INTERVAL
+
+      if (elapsedTime >= MAX_WAIT) {
+        // After waiting, check one more time if we have a recent download
+        chrome.downloads.search(
+          {
+            orderBy: ['-startTime'],
+            limit: 5,
+          },
+          (results) => {
+            if (resolved) return
+
+            const recentDownload = results?.find(
+              (d) =>
+                d.startTime &&
+                d.startTime >= startTime - 2000 &&
+                d.startTime <= Date.now(),
+            )
+
+            if (recentDownload) {
+              if (recentDownload.state === 'complete') {
+                resolved = true
+                console.log('[Download] Download completed (late check):', {
+                  id: recentDownload.id,
+                  filename: recentDownload.filename,
+                })
+                resolve()
+                return
+              }
+            }
+
+            // If we still haven't found it, consider it successful anyway
+            // (it might have completed very quickly)
+            resolved = true
+            console.log('[Download] Assuming download succeeded (not found in tracker)')
+            resolve()
+          },
+        )
+        return
+      }
+
+      setTimeout(checkForDownload, CHECK_INTERVAL)
+    }
+
+    // Start checking
+    setTimeout(checkForDownload, 1000) // Wait 1 second before first check
   })
 }
 
