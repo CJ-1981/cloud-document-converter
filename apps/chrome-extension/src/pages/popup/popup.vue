@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Eye, Copy, Download, Info, Settings } from 'lucide-vue-next'
+import { Eye, Copy, Download, Info, Settings, List } from 'lucide-vue-next'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,6 +30,14 @@ const handleOpenOptionsPage = () => {
     chrome.runtime.openOptionsPage()
   }
 }
+
+const handleOpenAutomation = () => {
+  if (import.meta.env.DEV) {
+    window.open('/pages/automation', '_blank')
+  } else {
+    chrome.tabs.create({ url: chrome.runtime.getURL('pages/automation.html') })
+  }
+}
 </script>
 
 <template>
@@ -50,6 +58,10 @@ const handleOpenOptionsPage = () => {
         {{ t('lark.docx.download') }}
       </DropdownMenuItem>
       <DropdownMenuSeparator />
+      <DropdownMenuItem @select="handleOpenAutomation">
+        <List />
+        Batch Download
+      </DropdownMenuItem>
       <DropdownMenuItem
         :as-child="true"
         class="underline-offset-4 hover:underline"

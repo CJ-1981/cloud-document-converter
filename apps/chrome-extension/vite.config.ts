@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => ({
       input: {
         options: resolve(__dirname, 'options.html'),
         popup: resolve(__dirname, 'popup.html'),
+        automation: resolve(__dirname, 'automation.html'),
       },
       output: {
         dir: 'dist/pages',

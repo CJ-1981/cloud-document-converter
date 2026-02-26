@@ -18,7 +18,7 @@
     }
   },
   "options_page": "pages/options.html",
-  "permissions": ["contextMenus", "scripting", "storage"],
+  "permissions": ["contextMenus", "scripting", "storage", "tabs", "downloads"],
   "host_permissions": [
     "https://*.feishu.cn/*",
     "https://*.feishu.net/*",

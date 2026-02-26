@@ -688,9 +688,50 @@ const main = async (options: { signal?: AbortSignal } = {}) => {
   } else {
     const blob = await toBlob()
 
-    legacyFileSave(blob, {
-      fileName: filename,
-    })
+    // Check if in automation mode
+    // @ts-expect-error - Automation mode flag
+    if (window.__AUTOMATION_MODE__) {
+      console.log('[Automation Download] Preparing to send:', {
+        filename,
+        blobSize: blob.size,
+        blobType: blob.type,
+      })
+
+      // Send blob to background script for Chrome Downloads API
+      const reader = new FileReader()
+      reader.onloadend = () => {
+        console.log(
+          '[Automation Download] Data URL length:',
+          reader.result?.length,
+        )
+        chrome.runtime.sendMessage(
+          {
+            type: 'AUTOMATION_DOWNLOAD',
+            filename: filename,
+            data: reader.result,
+          },
+          response => {
+            if (chrome.runtime.lastError) {
+              console.error(
+                '[Automation Download] Send error:',
+                chrome.runtime.lastError,
+              )
+            } else {
+              console.log('[Automation Download] Send response:', response)
+            }
+          },
+        )
+      }
+      reader.onerror = () => {
+        console.error('[Automation Download] FileReader error:', reader.error)
+      }
+      reader.readAsDataURL(blob)
+    } else {
+      // Existing logic (legacyFileSave)
+      legacyFileSave(blob, {
+        fileName: filename,
+      })
+    }
   }
 }
 

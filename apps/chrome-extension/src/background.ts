@@ -1,4 +1,8 @@
-import { type Message } from './common/message'
+import {
+  type Message,
+  type AutomationDownloadMessage,
+  Flag,
+} from './common/message'
 
 const sharedDocumentUrlPatterns: string[] = [
   'https://*.feishu.cn/*',
@@ -72,8 +76,84 @@ chrome.contextMenus.onClicked.addListener(({ menuItemId }, tab) => {
   }
 })
 
+/**
+ * Sanitize filename to remove invalid characters
+ */
+function sanitizeFilename(filename: string): string {
+  // Remove or replace invalid characters for Windows/Linux/Mac
+  return filename
+    .replace(/[<>:"/\\|?*]/g, '-') // Replace invalid chars with dash
+    .replace(/[\x00-\x1f\x80-\x9f]/g, '') // Remove control characters
+    .replace(/^\.+/, '') // Remove leading dots
+    .substring(0, 200) // Limit length
+}
+
 chrome.runtime.onMessage.addListener((_message, sender, sendResponse) => {
   const message = _message as Message
+
+  // Handle automation download
+  if ((message as AutomationDownloadMessage).type === 'AUTOMATION_DOWNLOAD') {
+    const automationMessage = message as AutomationDownloadMessage
+
+    console.log('[Automation] Received download request:', {
+      filename: automationMessage.filename,
+      dataSize: automationMessage.data.length,
+    })
+
+    // Sanitize filename
+    const sanitizedFilename = sanitizeFilename(automationMessage.filename)
+    console.log('[Automation] Sanitized filename:', sanitizedFilename)
+
+    // Use data URL directly (more reliable than blob URL)
+    const dataUrl = automationMessage.data
+
+    chrome.downloads.download(
+      {
+        url: dataUrl,
+        filename: sanitizedFilename,
+        saveAs: false, // KEY: Bypasses Save As dialog
+        conflictAction: 'uniquify', // Handle filename conflicts
+      },
+      downloadId => {
+        if (chrome.runtime.lastError) {
+          console.error(
+            '[Automation] Download failed:',
+            chrome.runtime.lastError,
+          )
+          sendResponse({
+            success: false,
+            error: chrome.runtime.lastError.message,
+          })
+        } else if (downloadId) {
+          console.log('[Automation] Download started:', downloadId)
+
+          // Wait a bit and check the download status
+          setTimeout(() => {
+            chrome.downloads.search({ id: downloadId }, results => {
+              if (results && results[0]) {
+                const download = results[0]
+                console.log('[Automation] Download status:', {
+                  state: download.state,
+                  filename: download.filename,
+                  totalBytes: download.totalBytes,
+                })
+              }
+            })
+          }, 2000)
+
+          sendResponse({ success: true, downloadId })
+        } else {
+          console.error('[Automation] Download failed: no downloadId returned')
+          sendResponse({ success: false, error: 'No download ID returned' })
+        }
+      },
+    )
+
+    return true
+  }
+
+  // Regular script execution message
+  const scriptMessage = message as Extract<Message, { flag: Flag }>
 
   const executeScript = async () => {
     const activeTabs = await chrome.tabs.query({
@@ -84,11 +164,13 @@ chrome.runtime.onMessage.addListener((_message, sender, sendResponse) => {
     const activeTabId = activeTabs.at(0)?.id
 
     if (activeTabs.length === 1 && activeTabId !== undefined) {
-      await executeScriptByFlag(message.flag, activeTabId)
+      await executeScriptByFlag(scriptMessage.flag, activeTabId)
     }
   }
 
-  executeScript().then(sendResponse).catch(console.error)
+  executeScript()
+    .then(() => sendResponse())
+    .catch(console.error)
 
   return true
 })

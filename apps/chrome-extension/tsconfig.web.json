@@ -2,7 +2,7 @@
   "extends": "@dolphin/typescript-config/app.json",
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.web.tsbuildinfo",
-    "types": ["@dolphin/common/env"],
+    "types": ["@dolphin/common/env", "chrome-types"],
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
