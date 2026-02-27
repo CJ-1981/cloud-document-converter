@@ -16,7 +16,7 @@ import {
   withSignal,
 } from '../common/utils'
 import { getSettings, TableWithNonPhrasingContent } from '../common/settings'
-import { DownloadMethod, SettingKey, fallbackSettings } from '@/common/settings'
+import { DownloadMethod, SettingKey } from '@/common/settings'
 
 const uniqueFileName = new UniqueFileName()
 
@@ -543,20 +543,13 @@ const main = async (options: { signal?: AbortSignal } = {}) => {
     throw new Error(DOWNLOAD_ABORTED)
   }
 
-  let settings
-  try {
-    settings = await getSettings([
-      SettingKey.DownloadMethod,
-      SettingKey.TableWithNonPhrasingContent,
-      SettingKey.TextHighlight,
-      SettingKey.DownloadFileWithUniqueName,
-      SettingKey.FlatGrid,
-    ])
-  } catch (error) {
-    // If settings fetch fails (timeout during automation), use fallback values
-    console.warn('[Settings] Failed to fetch settings, using defaults:', error)
-    settings = fallbackSettings
-  }
+  const settings = await getSettings([
+    SettingKey.DownloadMethod,
+    SettingKey.TableWithNonPhrasingContent,
+    SettingKey.TextHighlight,
+    SettingKey.DownloadFileWithUniqueName,
+    SettingKey.FlatGrid,
+  ])
 
   const { root, images, files, invalidTables, mentionUsers } =
     docx.intoMarkdownAST({
