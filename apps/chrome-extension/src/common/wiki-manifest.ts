@@ -104,6 +104,15 @@ function buildTree(pages: WikiPageInfo[]): TreeNode[] {
     }
   })
 
+  // Debug logging
+  console.log('[Manifest] Tree structure:')
+  roots.forEach(root => {
+    console.log(`  Root: ${root.page.title || root.page.url}`)
+    root.children.forEach(child => {
+      console.log(`    Child: ${child.page.title || child.page.url}`)
+    })
+  })
+
   return roots
 }
 
@@ -124,7 +133,9 @@ function renderTree(nodes: TreeNode[], prefix: string = ''): string {
     // Render children
     if (node.children.length > 0) {
       const childPrefix = prefix + (isLast ? '    ' : '│   ')
-      lines.push(renderTree(node.children, childPrefix))
+      const childLines = renderTree(node.children, childPrefix)
+      // Split and push each line to avoid flattening
+      childLines.split('\n').forEach(line => lines.push(line))
     }
   })
 

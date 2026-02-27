@@ -344,6 +344,7 @@ async function generateAndDownloadManifest(
     await downloadManifestFile(
       `${manifestBaseName}.md`,
       markdownManifest,
+      'text/markdown',
       onLog
     )
 
@@ -351,6 +352,7 @@ async function generateAndDownloadManifest(
     await downloadManifestFile(
       `${manifestBaseName}.csv`,
       csvManifest,
+      'text/csv',
       onLog
     )
 
@@ -366,19 +368,20 @@ async function generateAndDownloadManifest(
 async function downloadManifestFile(
   filename: string,
   content: string,
+  mimeType: string,
   onLog: (level: 'info' | 'error' | 'success', message: string) => void
 ): Promise<void> {
   try {
     onLog('info', `Creating manifest file: ${filename}`)
 
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+    const blob = new Blob([content], { type: `${mimeType};charset=utf-8` })
     const reader = new FileReader()
 
     await new Promise<void>((resolve, reject) => {
       reader.onloadend = () => {
         const dataUrl = reader.result as string
 
-        console.log(`[Manifest] Starting download: ${filename}, size: ${dataUrl.length} chars`)
+        console.log(`[Manifest] Starting download: ${filename}, MIME: ${mimeType}, size: ${dataUrl.length} chars`)
 
         chrome.downloads.download(
           {
