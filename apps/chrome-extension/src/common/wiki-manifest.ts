@@ -46,11 +46,15 @@ export function generateMarkdownManifest(manifest: WikiManifest): string {
 
   lines.push(`\n---\n`)
 
-  // Tree view
+  // Tree view (wrapped in code block for proper rendering)
   lines.push(`## 🌳 Wiki Structure (Tree View)\n`)
+  lines.push('```bash')
 
   const tree = buildTree(manifest.pages)
   lines.push(renderTree(tree))
+
+  lines.push('```')
+  lines.push('') // Add blank line after code block
 
   return lines.join('\n')
 }
