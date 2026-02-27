@@ -1,15 +1,8 @@
 // URL patterns for wiki detection
+// These match the pathname part (after the domain)
 const WIKI_PATTERNS = [
-  /feishu\.cn\/wiki/,
-  /feishu\.cn\/space\/[^/]+\/wiki/,
-  /feishu\.net\/wiki/,
-  /feishu\.net\/space\/[^/]+\/wiki/,
-  /larksuite\.com\/wiki/,
-  /larksuite\.com\/space\/[^/]+\/wiki/,
-  /larkoffice\.com\/wiki/,
-  /larkoffice\.com\/space\/[^/]+\/wiki/,
-  /larkenterprise\.com\/wiki/,
-  /larkenterprise\.com\/space\/[^/]+\/wiki/,
+  /\/wiki\//,           // Matches /wiki/ anywhere in path
+  /\/space\/[^/]+\/wiki\//, // Matches /space/{id}/wiki/
 ]
 
 /**
@@ -18,10 +11,22 @@ const WIKI_PATTERNS = [
 export function isWikiPage(url: string): boolean {
   try {
     const parsedUrl = new URL(url)
-    return WIKI_PATTERNS.some(pattern =>
-      pattern.test(parsedUrl.pathname + parsedUrl.search),
-    )
-  } catch {
+    const testString = parsedUrl.pathname + parsedUrl.search
+    const result = WIKI_PATTERNS.some(pattern => pattern.test(testString))
+
+    if (!result) {
+      console.log('[isWikiPage] Not matched:', {
+        url,
+        testString,
+        patterns: WIKI_PATTERNS,
+      })
+    } else {
+      console.log('[isWikiPage] Matched:', { url })
+    }
+
+    return result
+  } catch (error) {
+    console.error('[isWikiPage] Error:', error)
     return false
   }
 }
@@ -44,13 +49,8 @@ export function discoverWikiSubPagesCode(): string {
         try {
           const url = new URL(href, window.location.origin);
           const pathname = url.pathname + url.search;
-          const isWiki = ${WIKI_PATTERNS.map(p => p.toString()).join(' || ')}.some(pattern => {
-            try {
-              return new RegExp(pattern).test(pathname);
-            } catch {
-              return false;
-            }
-          });
+          // Simply check if it contains /wiki/
+          const isWiki = pathname.includes('/wiki/') || pathname.includes('/wiki?');
 
           // Exclude the current page
           const urlWithoutHash = url.origin + url.pathname;
@@ -317,13 +317,8 @@ function discoverWikiSubPagesFn(): string[] {
     try {
       const url = new URL(href, window.location.origin)
       const pathname = url.pathname + url.search
-      const isWiki = WIKI_PATTERNS.some(pattern => {
-        try {
-          return new RegExp(pattern).test(pathname)
-        } catch {
-          return false
-        }
-      })
+      // Simply check if it contains /wiki/
+      const isWiki = pathname.includes('/wiki/') || pathname.includes('/wiki?')
 
       const urlWithoutHash = url.origin + url.pathname
       if (urlWithoutHash === currentUrlWithoutHash) return false
