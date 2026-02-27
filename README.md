@@ -21,11 +21,16 @@ Install Cloud Document Converter from [Chrome Web Store](https://chromewebstore.
 
 - **Batch Download Automation**: Download multiple Lark/Feishu documents automatically
   - Supports URL input (one per line) or file upload (.txt/.csv)
-  - Recursive wiki sub-page discovery
+  - Recursive wiki sub-page discovery with **optimized single-pass download**
   - Automatic tab management - opens, downloads, and closes tabs
   - Real-time progress tracking and detailed logs
   - Pause/Resume/Stop controls
   - Files saved directly to Downloads folder (no "Save As" dialog)
+  - **Wiki Manifest Files**: Auto-generated organization files for wiki exports
+    - `wiki-manifest.md`: Table index + tree structure visualization with metadata
+    - `wiki-manifest.csv`: Spreadsheet-friendly format for filtering and sorting
+    - Shows page hierarchy, filenames, URLs, and export statistics
+    - Files named using sanitized page titles from the wiki
 
   ![Batch Download](images/BatchDownload.png)
 
