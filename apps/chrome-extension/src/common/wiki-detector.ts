@@ -160,11 +160,14 @@ export interface WikiPageInfo {
   title?: string
   depth: number
   parentUrl?: string
+  downloaded?: boolean // Track if already downloaded during discovery
+  downloadFilename?: string // The filename used for download
 }
 
 export interface WikiDiscoveryOptions {
   maxDepth?: number
   onProgress?: (currentDepth: number, totalUrls: number) => void
+  onPageDiscovered?: (page: WikiPageInfo, tabId: number) => Promise<void> // Callback to download page
 }
 
 /**
@@ -236,6 +239,18 @@ export async function discoverWikiRecursively(
       parentUrl: parentUrl,
     }
 
+    // Call the download callback if provided (downloads page during discovery)
+    if (options.onPageDiscovered && tab.id) {
+      try {
+        await options.onPageDiscovered(currentPageInfo, tab.id)
+        currentPageInfo.downloaded = true
+        console.log(`[Wiki Discovery] Downloaded during discovery: ${pageTitle || normalizedUrl}`)
+      } catch (error) {
+        console.error(`[Wiki Discovery] Failed to download during discovery: ${error}`)
+        // Don't fail the whole discovery if download fails
+      }
+    }
+
     // Filter out the current page and already visited URLs
     const newSubPages = subPages.filter(u => {
       const parsed = new URL(u)
@@ -275,9 +290,18 @@ export async function discoverWikiRecursively(
       }
     }
 
+    // Only close the tab if we didn't download it
+    if (!currentPageInfo.downloaded && tab.id) {
+      await chrome.tabs.remove(tab.id!).catch(() => {})
+    }
+
     return allPages
-  } finally {
-    await chrome.tabs.remove(tab.id!)
+  } catch (error) {
+    // Close tab on error
+    if (tab.id) {
+      await chrome.tabs.remove(tab.id!).catch(() => {})
+    }
+    throw error
   }
 }
 
