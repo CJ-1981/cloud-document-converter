@@ -34,26 +34,35 @@ export function discoverWikiSubPagesCode(): string {
   return `
     (function() {
       const foundUrls = new Set();
+      const currentUrl = window.location.href;
+      const currentUrlObj = new URL(currentUrl);
+      const currentUrlWithoutHash = currentUrlObj.origin + currentUrlObj.pathname;
 
-      // Helper to check if a link is a wiki link
+      // Helper to check if a link is a wiki link (but not the current page)
       function isWikiLink(href) {
-        if (!href) return false;
+        if (!href || href === currentUrl || href.startsWith('#')) return false;
         try {
           const url = new URL(href, window.location.origin);
           const pathname = url.pathname + url.search;
-          return ${WIKI_PATTERNS.map(p => p.toString()).join(' || ')}.some(pattern => {
+          const isWiki = ${WIKI_PATTERNS.map(p => p.toString()).join(' || ')}.some(pattern => {
             try {
               return new RegExp(pattern).test(pathname);
             } catch {
               return false;
             }
           });
+
+          // Exclude the current page
+          const urlWithoutHash = url.origin + url.pathname;
+          if (urlWithoutHash === currentUrlWithoutHash) return false;
+
+          return isWiki;
         } catch {
           return false;
         }
       }
 
-      // Method 1: Look for wiki table of contents
+      // Method 1: Look for wiki table of contents and sidebar
       const tocSelectors = [
         '[data-testid="wiki-toc"] a',
         '.wiki-toc a',
@@ -61,29 +70,84 @@ export function discoverWikiSubPagesCode(): string {
         '[data-testid="wiki-nav"] a',
         '.wiki-navigation a',
         'nav a[href*="/wiki/"]',
+        // Lark-specific selectors
+        '.wiki-catalog-tree-node-title a',
+        '.wiki-tree-item a',
+        '[class*="wiki"] a[href*="wiki"]',
+        'a[href*="/wiki/"]',
       ];
 
       tocSelectors.forEach(selector => {
-        document.querySelectorAll(selector).forEach(link => {
-          if (link.href && isWikiLink(link.href)) {
-            const url = new URL(link.href, window.location.origin);
-            // Remove fragments and search params for deduplication
-            url.hash = '';
-            url.search = '';
-            foundUrls.add(url.href);
-          }
-        });
+        try {
+          document.querySelectorAll(selector).forEach(link => {
+            const href = link.getAttribute('href');
+            if (href && isWikiLink(href)) {
+              const url = new URL(href, window.location.origin);
+              url.hash = '';
+              url.search = '';
+              foundUrls.add(url.href);
+            }
+          });
+        } catch (e) {
+          // Ignore selector errors
+        }
       });
 
-      // Method 2: Look for all wiki links on the page
+      // Method 2: Look for all links on the page that point to wiki pages
       document.querySelectorAll('a').forEach(link => {
-        if (link.href && isWikiLink(link.href)) {
-          const url = new URL(link.href, window.location.origin);
+        const href = link.getAttribute('href');
+        if (href && isWikiLink(href)) {
+          const url = new URL(href, window.location.origin);
           url.hash = '';
           url.search = '';
           foundUrls.add(url.href);
         }
       });
+
+      // Method 3: Look for any links containing wiki patterns
+      const allLinks = Array.from(document.querySelectorAll('a'));
+      allLinks.forEach(link => {
+        const textContent = link.textContent?.trim();
+        const href = link.getAttribute('href');
+
+        // Only add if it looks like a page link (has text content)
+        if (href && textContent && textContent.length > 0 && textContent.length < 200) {
+          if (href.includes('/wiki/') || href.includes('wiki')) {
+            try {
+              const url = new URL(href, window.location.origin);
+              url.hash = '';
+              url.search = '';
+              // Don't add the current page
+              if (url.href !== currentUrl) {
+                foundUrls.add(url.href);
+              }
+            } catch (e) {
+              // Invalid URL, skip
+            }
+          }
+        }
+      });
+
+      // Method 4: Look for data attributes that might contain page info
+      const pageElements = document.querySelectorAll('[data-page-id], [data-token], [data-url]');
+      pageElements.forEach(el => {
+        const href = el.getAttribute('href') || el.getAttribute('data-url');
+        if (href && isWikiLink(href)) {
+          try {
+            const url = new URL(href, window.location.origin);
+            url.hash = '';
+            url.search = '';
+            if (url.href !== currentUrl) {
+              foundUrls.add(url.href);
+            }
+          } catch (e) {
+            // Invalid URL, skip
+          }
+        }
+      });
+
+      console.log('[Wiki Discovery] Found URLs:', Array.from(foundUrls));
+      console.log('[Wiki Discovery] Total count:', foundUrls.size);
 
       // Convert Set to Array and return
       return Array.from(foundUrls);
@@ -104,7 +168,7 @@ export async function discoverWikiRecursively(
   maxDepth: number = Infinity,
   currentDepth: number = 0,
   visited: Set<string> = new Set(),
-  options: WikiDiscoveryOptions = {},
+  options: WikiDiscoveryOptions = {}
 ): Promise<string[]> {
   // Normalize URL for deduplication
   let normalizedUrl: string
@@ -138,23 +202,40 @@ export async function discoverWikiRecursively(
 
     const subPages = (results[0]?.result as string[]) || []
 
-    // Filter out already visited URLs
-    const newSubPages = subPages.filter(u => !visited.has(u))
+    console.log(`[Wiki Discovery] Depth ${currentDepth}: Found ${subPages.length} sub-pages from ${normalizedUrl}`)
+
+    // Filter out the current page and already visited URLs
+    const newSubPages = subPages.filter(u => {
+      const parsed = new URL(u)
+      parsed.hash = ''
+      const normalized = parsed.href
+      return normalized !== normalizedUrl && !visited.has(normalized)
+    })
 
     options.onProgress?.(currentDepth, visited.size)
 
-    // Recursively discover nested sub-pages
+    // Recursively discover nested sub-pages (with depth limit to prevent infinite loops)
     const allUrls: string[] = [normalizedUrl]
 
-    for (const subPage of newSubPages) {
-      const nested = await discoverWikiRecursively(
-        subPage,
-        maxDepth,
-        currentDepth + 1,
-        visited,
-        options,
-      )
-      allUrls.push(...nested)
+    // Limit recursion depth to prevent issues
+    const MAX_SUB_PAGES_PER_LEVEL = 50
+    const limitedSubPages = newSubPages.slice(0, MAX_SUB_PAGES_PER_LEVEL)
+
+    for (const subPage of limitedSubPages) {
+      // Only recurse if depth allows and we haven't visited too many pages
+      if (currentDepth + 1 < maxDepth && visited.size < 200) {
+        const nested = await discoverWikiRecursively(
+          subPage,
+          maxDepth,
+          currentDepth + 1,
+          visited,
+          options
+        )
+        allUrls.push(...nested)
+      } else {
+        // Just add the sub-page without recursing
+        allUrls.push(subPage)
+      }
     }
 
     return Array.from(new Set(allUrls))
@@ -166,10 +247,7 @@ export async function discoverWikiRecursively(
 /**
  * Wait for a page to complete loading
  */
-function waitForPageLoad(
-  tabId: number,
-  timeout: number = 30000,
-): Promise<void> {
+function waitForPageLoad(tabId: number, timeout: number = 30000): Promise<void> {
   return new Promise((resolve, reject) => {
     let resolved = false
 
@@ -177,35 +255,35 @@ function waitForPageLoad(
       if (!resolved && tabId_ === tabId && changeInfo.status === 'complete') {
         resolved = true
         chrome.tabs.onUpdated.removeListener(listener as any)
-        resolve()
+        // Wait a bit for dynamic content to load
+        setTimeout(resolve, 2000)
       }
     }
 
     chrome.tabs.onUpdated.addListener(listener as any)
 
     // Check if already complete
-    chrome.tabs
-      .get(tabId)
-      .then(tab => {
-        if (!resolved && tab.status === 'complete') {
-          resolved = true
-          chrome.tabs.onUpdated.removeListener(listener as any)
-          resolve()
-        }
-      })
-      .catch(error => {
-        if (!resolved) {
-          resolved = true
-          chrome.tabs.onUpdated.removeListener(listener as any)
-          reject(error)
-        }
-      })
+    chrome.tabs.get(tabId).then((tab) => {
+      if (!resolved && tab.status === 'complete') {
+        resolved = true
+        chrome.tabs.onUpdated.removeListener(listener as any)
+        // Wait a bit for dynamic content to load
+        setTimeout(resolve, 2000)
+      }
+    }).catch((error) => {
+      if (!resolved) {
+        resolved = true
+        chrome.tabs.onUpdated.removeListener(listener as any)
+        reject(error)
+      }
+    })
 
     setTimeout(() => {
       if (!resolved) {
         resolved = true
         chrome.tabs.onUpdated.removeListener(listener as any)
-        reject(new Error('Page load timeout'))
+        // Resolve anyway after timeout (page might be usable)
+        resolve()
       }
     }, timeout)
   })
@@ -216,6 +294,9 @@ function waitForPageLoad(
  */
 function discoverWikiSubPagesFn(): string[] {
   const foundUrls = new Set<string>()
+  const currentUrl = window.location.href
+  const currentUrlObj = new URL(currentUrl)
+  const currentUrlWithoutHash = currentUrlObj.origin + currentUrlObj.pathname
 
   // Wiki patterns (same as above but recreated for MAIN world)
   const WIKI_PATTERNS = [
@@ -231,54 +312,79 @@ function discoverWikiSubPagesFn(): string[] {
     /larkenterprise\.com\/space\/[^/]+\/wiki/,
   ]
 
-  // Helper to check if a link is a wiki link
   function isWikiLink(href: string): boolean {
-    if (!href) return false
+    if (!href || href === currentUrl || href.startsWith('#')) return false
     try {
       const url = new URL(href, window.location.origin)
       const pathname = url.pathname + url.search
-      return WIKI_PATTERNS.some(pattern => {
+      const isWiki = WIKI_PATTERNS.some(pattern => {
         try {
           return new RegExp(pattern).test(pathname)
         } catch {
           return false
         }
       })
+
+      const urlWithoutHash = url.origin + url.pathname
+      if (urlWithoutHash === currentUrlWithoutHash) return false
+
+      return isWiki
     } catch {
       return false
     }
   }
 
   // Look for wiki links in various selectors
-  const tocSelectors = [
+  const selectors = [
     '[data-testid="wiki-toc"] a',
     '.wiki-toc a',
     '.wiki-sidebar a',
     '[data-testid="wiki-nav"] a',
     '.wiki-navigation a',
     'nav a[href*="/wiki/"]',
+    '.wiki-catalog-tree-node-title a',
+    '.wiki-tree-item a',
+    '[class*="wiki"] a[href*="wiki"]',
   ]
 
-  tocSelectors.forEach(selector => {
-    document.querySelectorAll(selector).forEach((link: Element) => {
-      const a = link as HTMLAnchorElement
-      if (a.href && isWikiLink(a.href)) {
-        const url = new URL(a.href, window.location.origin)
-        url.hash = ''
-        url.search = ''
-        foundUrls.add(url.href)
-      }
-    })
+  selectors.forEach(selector => {
+    try {
+      document.querySelectorAll(selector).forEach((link: Element) => {
+        const a = link as HTMLAnchorElement
+        const href = a.getAttribute('href')
+        if (href && isWikiLink(href)) {
+          const url = new URL(href, window.location.origin)
+          url.hash = ''
+          url.search = ''
+          if (url.href !== currentUrl) {
+            foundUrls.add(url.href)
+          }
+        }
+      })
+    } catch (e) {
+      // Ignore selector errors
+    }
   })
 
-  // Look for all wiki links on the page
+  // Also look for all wiki links on the page
   document.querySelectorAll('a').forEach((link: Element) => {
     const a = link as HTMLAnchorElement
-    if (a.href && isWikiLink(a.href)) {
-      const url = new URL(a.href, window.location.origin)
-      url.hash = ''
-      url.search = ''
-      foundUrls.add(url.href)
+    const href = a.getAttribute('href')
+    const textContent = a.textContent?.trim()
+
+    if (href && textContent && textContent.length > 0 && textContent.length < 200) {
+      if (isWikiLink(href)) {
+        try {
+          const url = new URL(href, window.location.origin)
+          url.hash = ''
+          url.search = ''
+          if (url.href !== currentUrl) {
+            foundUrls.add(url.href)
+          }
+        } catch (e) {
+          // Invalid URL, skip
+        }
+      }
     }
   })
 

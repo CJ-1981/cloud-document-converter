@@ -32,15 +32,25 @@ export async function startBatchDownload(
   onLog('info', 'Processing URLs...')
 
   // Process each input URL
-  for (const url of urls) {
-    onLog('info', `Processing: ${url}`)
+  for (const inputUrl of urls) {
+    onLog('info', `Processing: ${inputUrl}`)
 
-    if (isWikiPage(url) && recursiveWiki) {
+    // Normalize the input URL for comparison
+    let normalizedInputUrl: string
+    try {
+      const parsed = new URL(inputUrl)
+      parsed.hash = ''
+      normalizedInputUrl = parsed.href
+    } catch {
+      normalizedInputUrl = inputUrl
+    }
+
+    if (isWikiPage(inputUrl) && recursiveWiki) {
       onLog('info', 'Detected wiki page, discovering sub-pages...')
 
       try {
         const wikiUrls = await discoverWikiRecursively(
-          url,
+          inputUrl,
           maxDepth === -1 ? Infinity : maxDepth,
           0,
           new Set(),
@@ -54,13 +64,24 @@ export async function startBatchDownload(
           },
         )
 
-        onLog('info', `Found ${wikiUrls.length} pages (including sub-pages)`)
+        onLog('info', `Found ${wikiUrls.length} pages (including main page)`)
 
+        // wikiUrls[0] is always the main page we started with
+        // The rest are sub-pages
         if (includeMainPage) {
+          // Include all pages (main + sub-pages)
           wikiUrls.forEach(u => allUrls.add(u))
+          onLog('info', `Including main page: downloading all ${wikiUrls.length} pages`)
         } else {
-          // Skip the first URL (main page) if not including
-          wikiUrls.slice(1).forEach(u => allUrls.add(u))
+          // Skip the main page (first element), only download sub-pages
+          if (wikiUrls.length > 1) {
+            wikiUrls.slice(1).forEach(u => allUrls.add(u))
+            onLog('info', `Excluding main page: downloading ${wikiUrls.length - 1} sub-pages`)
+          } else {
+            // Only found main page, no sub-pages
+            // Since user excluded main page, add nothing
+            onLog('info', 'No sub-pages found and main page excluded - skipping')
+          }
         }
       } catch (error) {
         onLog(
@@ -68,18 +89,27 @@ export async function startBatchDownload(
           `Failed to discover wiki pages: ${error instanceof Error ? error.message : String(error)}`,
         )
         // Still add the original URL as fallback
-        allUrls.add(url)
+        onLog('info', 'Adding original URL as fallback')
+        allUrls.add(inputUrl)
       }
     } else {
-      allUrls.add(url)
+      // Not a wiki or wiki discovery disabled, just add the URL
+      onLog('info', 'Adding URL directly (wiki discovery disabled or not a wiki page)')
+      allUrls.add(inputUrl)
     }
   }
 
-  onLog('info', `Total URLs to download: ${allUrls.size}`)
+  const finalUrls = Array.from(allUrls)
+  onLog('info', `Total URLs to download: ${finalUrls.length}`)
+
+  if (finalUrls.length === 0) {
+    onLog('error', 'No URLs to download!')
+    return
+  }
 
   // Create batch manager
   const batchManager = new BatchManager({
-    urls: Array.from(allUrls),
+    urls: finalUrls,
     maxRetries: 3,
     delay,
     onProgress,
