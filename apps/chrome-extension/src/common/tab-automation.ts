@@ -56,9 +56,8 @@ export async function downloadDocument(
     // Wait for download to complete and write to disk
     await waitForDownloadComplete(downloadStartTime, timeout, onDownloadTimeout)
 
-    // Add extra delay to ensure file is fully written to disk
-    // This is crucial because Chrome reports "complete" before the file is fully saved
-    await new Promise(resolve => setTimeout(resolve, 3000))
+    // Small delay to ensure file is fully written to disk
+    await new Promise(resolve => setTimeout(resolve, 1000))
 
     // Try to get the title from the page
     const titleResults = await chrome.scripting.executeScript({
@@ -157,8 +156,8 @@ function waitForDownloadComplete(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     let resolved = false
-    const CHECK_INTERVAL = 500 // Check every 500ms
-    const MAX_WAIT = 10000 // Wait up to 10 seconds for download to complete
+    const CHECK_INTERVAL = 200 // Check every 200ms (faster)
+    const MAX_WAIT = 5000 // Wait up to 5 seconds (reduced from 10)
     let elapsedTime = 0
 
     const checkForDownload = async () => {
@@ -169,7 +168,7 @@ function waitForDownloadComplete(
           chrome.downloads.search(
             {
               orderBy: ['-startTime'],
-              limit: 50, // Check recent downloads
+              limit: 50,
             },
             (result) => resolve(result),
           )
@@ -184,7 +183,7 @@ function waitForDownloadComplete(
         const ourDownloads = results.filter(
           (download) =>
             download.startTime &&
-            download.startTime >= startTime - 1000 && // Within 1 second before start
+            download.startTime >= startTime - 1000 &&
             download.startTime <= Date.now(),
         )
 
@@ -205,14 +204,6 @@ function waitForDownloadComplete(
             console.error('[Download] Download failed:', download.error)
             reject(new Error(`Download error: ${download.error}`))
             return
-          } else if (download.state === 'in_progress') {
-            // Download is still in progress, check again later
-            console.log('[Download] Download in progress:', {
-              id: download.id,
-              filename: download.filename,
-              receivedBytes: download.receivedBytes,
-              totalBytes: download.totalBytes,
-            })
           }
         }
       } catch (error) {
@@ -244,20 +235,17 @@ function waitForDownloadComplete(
                 d.startTime <= Date.now(),
             )
 
-            if (recentDownload) {
-              if (recentDownload.state === 'complete') {
-                resolved = true
-                console.log('[Download] Download completed (late check):', {
-                  id: recentDownload.id,
-                  filename: recentDownload.filename,
-                })
-                resolve()
-                return
-              }
+            if (recentDownload && recentDownload.state === 'complete') {
+              resolved = true
+              console.log('[Download] Download completed (late check):', {
+                id: recentDownload.id,
+                filename: recentDownload.filename,
+              })
+              resolve()
+              return
             }
 
             // If we still haven't found it, consider it successful anyway
-            // (it might have completed very quickly)
             resolved = true
             console.log('[Download] Assuming download succeeded (not found in tracker)')
             resolve()
@@ -269,8 +257,8 @@ function waitForDownloadComplete(
       setTimeout(checkForDownload, CHECK_INTERVAL)
     }
 
-    // Start checking
-    setTimeout(checkForDownload, 1000) // Wait 1 second before first check
+    // Start checking immediately (no delay)
+    checkForDownload()
   })
 }
 
