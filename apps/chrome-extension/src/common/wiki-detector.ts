@@ -1,7 +1,7 @@
 // URL patterns for wiki detection
 // These match the pathname part (after the domain)
 const WIKI_PATTERNS = [
-  /\/wiki\//,           // Matches /wiki/ anywhere in path
+  /\/wiki\//, // Matches /wiki/ anywhere in path
   /\/space\/[^/]+\/wiki\//, // Matches /space/{id}/wiki/
 ]
 
@@ -162,6 +162,7 @@ export interface WikiPageInfo {
   parentUrl?: string
   downloaded?: boolean // Track if already downloaded during discovery
   downloadFilename?: string // The filename used for download
+  index?: number // Sequential index for ordering in manifest
 }
 
 export interface WikiDiscoveryOptions {
@@ -179,7 +180,7 @@ export async function discoverWikiRecursively(
   currentDepth: number = 0,
   visited: Set<string> = new Set(),
   options: WikiDiscoveryOptions = {},
-  parentUrl?: string
+  parentUrl?: string,
 ): Promise<WikiPageInfo[]> {
   // Normalize URL for deduplication
   let normalizedUrl: string
@@ -229,7 +230,9 @@ export async function discoverWikiRecursively(
 
     const subPages = (results[0]?.result as string[]) || []
 
-    console.log(`[Wiki Discovery] Depth ${currentDepth}: Found ${subPages.length} sub-pages from ${normalizedUrl}`)
+    console.log(
+      `[Wiki Discovery] Depth ${currentDepth}: Found ${subPages.length} sub-pages from ${normalizedUrl}`,
+    )
 
     // Create page info for current page
     const currentPageInfo: WikiPageInfo = {
@@ -244,9 +247,13 @@ export async function discoverWikiRecursively(
       try {
         await options.onPageDiscovered(currentPageInfo, tab.id)
         currentPageInfo.downloaded = true
-        console.log(`[Wiki Discovery] Downloaded during discovery: ${pageTitle || normalizedUrl}`)
+        console.log(
+          `[Wiki Discovery] Downloaded during discovery: ${pageTitle || normalizedUrl}`,
+        )
       } catch (error) {
-        console.error(`[Wiki Discovery] Failed to download during discovery: ${error}`)
+        console.error(
+          `[Wiki Discovery] Failed to download during discovery: ${error}`,
+        )
         // Don't fail the whole discovery if download fails
       }
     }
@@ -277,7 +284,7 @@ export async function discoverWikiRecursively(
           currentDepth + 1,
           visited,
           options,
-          normalizedUrl // Current page is the parent
+          normalizedUrl, // Current page is the parent
         )
         allPages.push(...nested)
       } else {
@@ -308,7 +315,10 @@ export async function discoverWikiRecursively(
 /**
  * Wait for a page to complete loading
  */
-function waitForPageLoad(tabId: number, timeout: number = 30000): Promise<void> {
+function waitForPageLoad(
+  tabId: number,
+  timeout: number = 30000,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     let resolved = false
 
@@ -324,20 +334,23 @@ function waitForPageLoad(tabId: number, timeout: number = 30000): Promise<void> 
     chrome.tabs.onUpdated.addListener(listener as any)
 
     // Check if already complete
-    chrome.tabs.get(tabId).then((tab) => {
-      if (!resolved && tab.status === 'complete') {
-        resolved = true
-        chrome.tabs.onUpdated.removeListener(listener as any)
-        // Wait a bit for dynamic content to load
-        setTimeout(resolve, 2000)
-      }
-    }).catch((error) => {
-      if (!resolved) {
-        resolved = true
-        chrome.tabs.onUpdated.removeListener(listener as any)
-        reject(error)
-      }
-    })
+    chrome.tabs
+      .get(tabId)
+      .then(tab => {
+        if (!resolved && tab.status === 'complete') {
+          resolved = true
+          chrome.tabs.onUpdated.removeListener(listener as any)
+          // Wait a bit for dynamic content to load
+          setTimeout(resolve, 2000)
+        }
+      })
+      .catch(error => {
+        if (!resolved) {
+          resolved = true
+          chrome.tabs.onUpdated.removeListener(listener as any)
+          reject(error)
+        }
+      })
 
     setTimeout(() => {
       if (!resolved) {
@@ -428,7 +441,12 @@ function discoverWikiSubPagesFn(): string[] {
     const href = a.getAttribute('href')
     const textContent = a.textContent?.trim()
 
-    if (href && textContent && textContent.length > 0 && textContent.length < 200) {
+    if (
+      href &&
+      textContent &&
+      textContent.length > 0 &&
+      textContent.length < 200
+    ) {
       if (isWikiLink(href)) {
         try {
           const url = new URL(href, window.location.origin)

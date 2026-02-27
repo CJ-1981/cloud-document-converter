@@ -169,7 +169,9 @@ chrome.runtime.onMessage.addListener((_message, sender, sendResponse) => {
   }
 
   executeScript()
-    .then(() => { sendResponse(); })
+    .then(() => {
+      sendResponse()
+    })
     .catch(console.error)
 
   return true

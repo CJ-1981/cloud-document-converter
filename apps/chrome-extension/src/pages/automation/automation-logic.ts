@@ -11,6 +11,7 @@ import {
   generateFilename,
   type WikiManifest,
 } from '@/common/wiki-manifest'
+import { getSettings, SettingKey } from '@/common/settings'
 
 export interface BatchDownloadOptions {
   urls: string[]
@@ -41,6 +42,19 @@ export async function startBatchDownload(
   const wikiPages: WikiPageInfo[] = [] // Track wiki pages for manifest
   const downloadedUrls = new Set<string>() // Track URLs already downloaded during discovery
 
+  // Get settings for subfolder preference
+  const settings = await getSettings([SettingKey.BatchDownloadSubfolder])
+  const useSubfolder = settings[SettingKey.BatchDownloadSubfolder]
+
+  // Check if we're doing a wiki batch download (will determine subfolder after first wiki discovery)
+  let subfolder: string | null = null
+  const generateSubfolderIfNeeded = () => {
+    if (useSubfolder && !subfolder) {
+      subfolder = generateSubfolderName()
+      onLog('info', `📁 Files will be organized in subfolder: ${subfolder}`)
+    }
+  }
+
   onLog('info', 'Processing URLs...')
 
   // Process each input URL
@@ -60,6 +74,9 @@ export async function startBatchDownload(
     if (isWikiPage(inputUrl) && recursiveWiki) {
       onLog('info', 'Detected wiki page, discovering sub-pages...')
 
+      // Generate subfolder when first wiki is detected
+      generateSubfolderIfNeeded()
+
       try {
         const discoveredPages = await discoverWikiRecursively(
           inputUrl,
@@ -75,14 +92,20 @@ export async function startBatchDownload(
             },
             onPageDiscovered: async (page, tabId) => {
               // Download the page content during discovery!
-              onLog('info', `📥 Downloading during discovery: ${page.title || page.url}`)
-              await downloadPageInTab(tabId, page, onLog)
+              onLog(
+                'info',
+                `📥 Downloading during discovery: ${page.title || page.url}`,
+              )
+              await downloadPageInTab(tabId, page, subfolder, onLog)
               downloadedUrls.add(page.url)
             },
           },
         )
 
-        onLog('info', `Found ${discoveredPages.length} pages (including main page)`)
+        onLog(
+          'info',
+          `Found ${discoveredPages.length} pages (including main page)`,
+        )
 
         // discoveredPages[0] is always the main page we started with
         // The rest are sub-pages
@@ -97,7 +120,10 @@ export async function startBatchDownload(
               wikiPages.push(p)
             }
           })
-          onLog('info', `Including main page: downloading all ${discoveredPages.length} pages`)
+          onLog(
+            'info',
+            `Including main page: downloading all ${discoveredPages.length} pages`,
+          )
         } else {
           // Skip the main page (first element), only download sub-pages
           if (discoveredPages.length > 1) {
@@ -109,10 +135,16 @@ export async function startBatchDownload(
                 wikiPages.push(p)
               }
             })
-            onLog('info', `Excluding main page: downloading ${discoveredPages.length - 1} sub-pages`)
+            onLog(
+              'info',
+              `Excluding main page: downloading ${discoveredPages.length - 1} sub-pages`,
+            )
           } else {
             // Only found main page, no sub-pages
-            onLog('info', 'No sub-pages found and main page excluded - skipping')
+            onLog(
+              'info',
+              'No sub-pages found and main page excluded - skipping',
+            )
           }
         }
       } catch (error) {
@@ -126,7 +158,10 @@ export async function startBatchDownload(
       }
     } else {
       // Not a wiki or wiki discovery disabled, just add the URL
-      onLog('info', 'Adding URL directly (wiki discovery disabled or not a wiki page)')
+      onLog(
+        'info',
+        'Adding URL directly (wiki discovery disabled or not a wiki page)',
+      )
       allUrls.add(inputUrl)
     }
   }
@@ -143,13 +178,21 @@ export async function startBatchDownload(
 
   // Debug: log all wiki page titles
   if (wikiPages.length > 0) {
-    console.log('[Manifest] Wiki pages for manifest:', wikiPages.map(p => ({ title: p.title, url: p.url })))
+    console.log(
+      '[Manifest] Wiki pages for manifest:',
+      wikiPages.map(p => ({ title: p.title, url: p.url })),
+    )
   }
 
   // Generate manifest if we have multiple wiki pages (including single page with sub-pages)
   if (wikiPages.length >= 1) {
     onLog('info', 'Generating wiki manifest files...')
-    await generateAndDownloadManifest(wikiPages, urls[0], onLog)
+    await generateAndDownloadManifest(
+      wikiPages,
+      urls[0] || '',
+      subfolder,
+      onLog,
+    )
   } else {
     onLog('info', 'No wiki pages found for manifest generation')
   }
@@ -207,9 +250,17 @@ export async function startBatchDownload(
 async function downloadPageInTab(
   tabId: number,
   page: WikiPageInfo,
-  onLog: (level: 'info' | 'error' | 'success', message: string) => void
+  subfolder: string | null,
+  onLog: (level: 'info' | 'error' | 'success', message: string) => void,
 ): Promise<void> {
   try {
+    // Store subfolder in chrome.storage for the download script to read
+    if (subfolder) {
+      await chrome.storage.local.set({ __AUTOMATION_SUBFOLDER__: subfolder })
+    } else {
+      await chrome.storage.local.remove('__AUTOMATION_SUBFOLDER__')
+    }
+
     // Set automation flag
     await chrome.scripting.executeScript({
       func: () => {
@@ -238,7 +289,10 @@ async function downloadPageInTab(
 
     onLog('success', `✓ Downloaded: ${page.title || page.url}`)
   } catch (error) {
-    onLog('error', `✗ Failed to download ${page.url}: ${error instanceof Error ? error.message : String(error)}`)
+    onLog(
+      'error',
+      `✗ Failed to download ${page.url}: ${error instanceof Error ? error.message : String(error)}`,
+    )
     // Close tab even if download failed
     await chrome.tabs.remove(tabId).catch(() => {})
     throw error
@@ -259,19 +313,21 @@ function waitForDownloadComplete(
 
     const checkForDownload = async () => {
       try {
-        const results = await new Promise<chrome.downloads.DownloadItem[]>((resolve) => {
-          chrome.downloads.search(
-            {
-              orderBy: ['-startTime'],
-              limit: 20,
-            },
-            (result) => resolve(result),
-          )
-        })
+        const results = await new Promise<chrome.downloads.DownloadItem[]>(
+          resolve => {
+            chrome.downloads.search(
+              {
+                orderBy: ['-startTime'],
+                limit: 20,
+              },
+              result => resolve(result),
+            )
+          },
+        )
 
         if (results) {
           const ourDownload = results.find(
-            (d) =>
+            d =>
               d.startTime &&
               d.startTime >= startTime - 1000 &&
               d.startTime <= Date.now(),
@@ -312,13 +368,14 @@ function waitForDownloadComplete(
 async function generateAndDownloadManifest(
   pages: WikiPageInfo[],
   rootUrl: string,
-  onLog: (level: 'info' | 'error' | 'success', message: string) => void
+  subfolder: string | null,
+  onLog: (level: 'info' | 'error' | 'success', message: string) => void,
 ): Promise<void> {
   try {
     // Assign filenames to pages
     const pagesWithFilenames = pages.map((page, index) => ({
       ...page,
-      filename: generateFilename(page, index),
+      downloadFilename: generateFilename(page, index),
       index,
     }))
 
@@ -340,25 +397,29 @@ async function generateAndDownloadManifest(
     // Download both manifests
     const manifestBaseName = 'wiki-manifest'
 
+    // Prepend subfolder path if specified
+    const mdPath = subfolder
+      ? `${subfolder}/${manifestBaseName}.md`
+      : `${manifestBaseName}.md`
+    const csvPath = subfolder
+      ? `${subfolder}/${manifestBaseName}.csv`
+      : `${manifestBaseName}.csv`
+
     // Download markdown manifest
-    await downloadManifestFile(
-      `${manifestBaseName}.md`,
-      markdownManifest,
-      'text/markdown',
-      onLog
-    )
+    await downloadManifestFile(mdPath, markdownManifest, 'text/markdown', onLog)
 
     // Download CSV manifest
-    await downloadManifestFile(
-      `${manifestBaseName}.csv`,
-      csvManifest,
-      'text/csv',
-      onLog
-    )
+    await downloadManifestFile(csvPath, csvManifest, 'text/csv', onLog)
 
-    onLog('success', `✓ Generated manifest files: ${manifestBaseName}.md and ${manifestBaseName}.csv`)
+    onLog(
+      'success',
+      `✓ Generated manifest files: ${manifestBaseName}.md and ${manifestBaseName}.csv`,
+    )
   } catch (error) {
-    onLog('error', `Failed to generate manifest: ${error instanceof Error ? error.message : String(error)}`)
+    onLog(
+      'error',
+      `Failed to generate manifest: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
 }
 
@@ -369,7 +430,7 @@ async function downloadManifestFile(
   filename: string,
   content: string,
   mimeType: string,
-  onLog: (level: 'info' | 'error' | 'success', message: string) => void
+  onLog: (level: 'info' | 'error' | 'success', message: string) => void,
 ): Promise<void> {
   try {
     onLog('info', `Creating manifest file: ${filename}`)
@@ -381,7 +442,9 @@ async function downloadManifestFile(
       reader.onloadend = () => {
         const dataUrl = reader.result as string
 
-        console.log(`[Manifest] Starting download: ${filename}, MIME: ${mimeType}, size: ${dataUrl.length} chars`)
+        console.log(
+          `[Manifest] Starting download: ${filename}, MIME: ${mimeType}, size: ${dataUrl.length} chars`,
+        )
 
         chrome.downloads.download(
           {
@@ -390,18 +453,25 @@ async function downloadManifestFile(
             saveAs: false,
             conflictAction: 'uniquify',
           },
-          (downloadId) => {
+          downloadId => {
             if (chrome.runtime.lastError) {
-              console.error('[Manifest] Download failed:', chrome.runtime.lastError)
+              console.error(
+                '[Manifest] Download failed:',
+                chrome.runtime.lastError,
+              )
               reject(new Error(chrome.runtime.lastError.message))
             } else if (downloadId) {
-              console.log(`[Manifest] Download started: ${filename}, ID: ${downloadId}`)
+              console.log(
+                `[Manifest] Download started: ${filename}, ID: ${downloadId}`,
+              )
               resolve()
             } else {
-              console.error('[Manifest] Download failed: No download ID returned')
+              console.error(
+                '[Manifest] Download failed: No download ID returned',
+              )
               reject(new Error('Failed to download manifest'))
             }
-          }
+          },
         )
       }
 
@@ -418,7 +488,26 @@ async function downloadManifestFile(
 
     onLog('success', `✓ Downloaded: ${filename}`)
   } catch (error) {
-    onLog('error', `✗ Failed to download ${filename}: ${error instanceof Error ? error.message : String(error)}`)
+    onLog(
+      'error',
+      `✗ Failed to download ${filename}: ${error instanceof Error ? error.message : String(error)}`,
+    )
     throw error
   }
+}
+
+/**
+ * Generate a subfolder name for batch downloads
+ * Format: wiki-export-{YYYY-MM-DD-HHMMSS}
+ */
+function generateSubfolderName(): string {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const hours = String(now.getHours()).padStart(2, '0')
+  const minutes = String(now.getMinutes()).padStart(2, '0')
+  const seconds = String(now.getSeconds()).padStart(2, '0')
+
+  return `wiki-export-${year}-${month}-${day}-${hours}${minutes}${seconds}`
 }

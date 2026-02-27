@@ -1,11 +1,7 @@
-export interface WikiPageInfo {
-  url: string
-  title?: string
-  depth: number
-  parentUrl?: string
-  filename?: string
-  index: number
-}
+import type { WikiPageInfo } from './wiki-detector'
+
+// Re-export for convenience
+export type { WikiPageInfo } from './wiki-detector'
 
 export interface WikiManifest {
   title: string
@@ -25,8 +21,10 @@ export function generateMarkdownManifest(manifest: WikiManifest): string {
   lines.push(`# ${manifest.title}\n`)
   lines.push(`**Wiki Export Manifest**\n`)
   lines.push(`- **Root URL:** ${manifest.rootUrl}`)
-  lines.push(`- **Total Files:** ${manifest.totalFiles}`)
-  lines.push(`- **Generated:** ${new Date(manifest.generatedAt).toLocaleString()}\n`)
+  lines.push(`- **Total Files:** ${String(manifest.totalFiles)}`)
+  lines.push(
+    `- **Generated:** ${new Date(manifest.generatedAt).toLocaleString()}\n`,
+  )
   lines.push(`---\n`)
 
   // Table of contents
@@ -36,11 +34,13 @@ export function generateMarkdownManifest(manifest: WikiManifest): string {
 
   manifest.pages.forEach((page, index) => {
     const depthIndicator = '  '.repeat(page.depth)
-    const filename = page.filename || `${page.index + 1}.md`
-    const title = page.title || 'Untitled'
+    const filename = page.downloadFilename ?? `${String((page.index ?? index) + 1)}.md`
+    const title = page.title ?? 'Untitled'
     const url = shortenUrl(page.url)
 
-    lines.push(`| ${index + 1} | \`${filename}\` | ${depthIndicator}${title} | ${page.depth} | [View](${url}) |`)
+    lines.push(
+      `| ${String(index + 1)} | \`${filename}\` | ${depthIndicator}${title} | ${String(page.depth)} | [View](${url}) |`,
+    )
   })
 
   lines.push(`\n---\n`)
@@ -64,12 +64,14 @@ export function generateCSVManifest(manifest: WikiManifest): string {
   lines.push('#,Filename,Title,Depth,Parent URL,URL')
 
   manifest.pages.forEach((page, index) => {
-    const filename = page.filename || `${page.index + 1}.md`
-    const title = (page.title || 'Untitled').replace(/"/g, '""') // Escape quotes
+    const filename = page.downloadFilename ?? `${String((page.index ?? index) + 1)}.md`
+    const title = (page.title ?? 'Untitled').replace(/"/g, '""') // Escape quotes
     const url = page.url
-    const parentUrl = page.parentUrl || ''
+    const parentUrl = page.parentUrl ?? ''
 
-    lines.push(`${index + 1},"${filename}","${title}",${page.depth},"${parentUrl}","${url}"`)
+    lines.push(
+      `${String(index + 1)},"${filename}","${title}",${String(page.depth)},"${parentUrl}","${url}"`,
+    )
   })
 
   return lines.join('\n')
@@ -125,8 +127,9 @@ function renderTree(nodes: TreeNode[], prefix: string = ''): string {
   nodes.forEach((node, index) => {
     const isLast = index === nodes.length - 1
     const connector = isLast ? '└── ' : '├── '
-    const title = node.page.title || node.page.filename || 'Untitled'
-    const filename = node.page.filename || `${node.page.index + 1}.md`
+    const title = node.page.title ?? node.page.downloadFilename ?? 'Untitled'
+    const filename =
+      node.page.downloadFilename ?? `${String((node.page.index ?? 0) + 1)}.md`
 
     lines.push(`${prefix}${connector}${title} (\`${filename}\`)`)
 

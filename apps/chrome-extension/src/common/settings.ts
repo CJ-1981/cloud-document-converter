@@ -11,6 +11,7 @@ export enum SettingKey {
   TextHighlight = 'general.text_highlight',
   DownloadFileWithUniqueName = 'download.file_with_unique_name',
   FlatGrid = 'general.flat_grid',
+  BatchDownloadSubfolder = 'download.batch_subfolder',
 }
 
 export enum Theme {
@@ -37,6 +38,7 @@ export interface Settings {
   [SettingKey.TextHighlight]: boolean
   [SettingKey.DownloadFileWithUniqueName]: boolean
   [SettingKey.FlatGrid]: boolean
+  [SettingKey.BatchDownloadSubfolder]: boolean
 }
 
 export const fallbackSettings: Settings = {
@@ -49,6 +51,7 @@ export const fallbackSettings: Settings = {
   [SettingKey.TextHighlight]: true,
   [SettingKey.DownloadFileWithUniqueName]: false,
   [SettingKey.FlatGrid]: false,
+  [SettingKey.BatchDownloadSubfolder]: true,
 }
 
 export const getSettings = async <Key extends keyof Settings>(

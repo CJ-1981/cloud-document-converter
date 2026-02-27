@@ -120,19 +120,22 @@ function waitForPageLoad(
     chrome.tabs.onUpdated.addListener(listener as any)
 
     // Check if already complete
-    chrome.tabs.get(tabId).then((tab) => {
-      if (!resolved && tab.status === 'complete') {
-        resolved = true
-        chrome.tabs.onUpdated.removeListener(listener as any)
-        resolve()
-      }
-    }).catch((error) => {
-      if (!resolved) {
-        resolved = true
-        chrome.tabs.onUpdated.removeListener(listener as any)
-        reject(error)
-      }
-    })
+    chrome.tabs
+      .get(tabId)
+      .then(tab => {
+        if (!resolved && tab.status === 'complete') {
+          resolved = true
+          chrome.tabs.onUpdated.removeListener(listener as any)
+          resolve()
+        }
+      })
+      .catch(error => {
+        if (!resolved) {
+          resolved = true
+          chrome.tabs.onUpdated.removeListener(listener as any)
+          reject(error)
+        }
+      })
 
     // Timeout
     setTimeout(() => {
@@ -164,15 +167,17 @@ function waitForDownloadComplete(
       if (resolved) return
 
       try {
-        const results = await new Promise<chrome.downloads.DownloadItem[]>((resolve) => {
-          chrome.downloads.search(
-            {
-              orderBy: ['-startTime'],
-              limit: 50,
-            },
-            (result) => resolve(result),
-          )
-        })
+        const results = await new Promise<chrome.downloads.DownloadItem[]>(
+          resolve => {
+            chrome.downloads.search(
+              {
+                orderBy: ['-startTime'],
+                limit: 50,
+              },
+              result => resolve(result),
+            )
+          },
+        )
 
         if (!results) {
           scheduleNextCheck()
@@ -181,7 +186,7 @@ function waitForDownloadComplete(
 
         // Look for downloads that started after our start time
         const ourDownloads = results.filter(
-          (download) =>
+          download =>
             download.startTime &&
             download.startTime >= startTime - 1000 &&
             download.startTime <= Date.now(),
@@ -225,11 +230,11 @@ function waitForDownloadComplete(
             orderBy: ['-startTime'],
             limit: 5,
           },
-          (results) => {
+          results => {
             if (resolved) return
 
             const recentDownload = results?.find(
-              (d) =>
+              d =>
                 d.startTime &&
                 d.startTime >= startTime - 2000 &&
                 d.startTime <= Date.now(),
@@ -247,7 +252,9 @@ function waitForDownloadComplete(
 
             // If we still haven't found it, consider it successful anyway
             resolved = true
-            console.log('[Download] Assuming download succeeded (not found in tracker)')
+            console.log(
+              '[Download] Assuming download succeeded (not found in tracker)',
+            )
             resolve()
           },
         )

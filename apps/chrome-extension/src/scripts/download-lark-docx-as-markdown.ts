@@ -567,7 +567,25 @@ const main = async (options: { signal?: AbortSignal } = {}) => {
     : 'doc'
   const isZip = images.length > 0 || files.length > 0
   const ext = isZip ? '.zip' : '.md'
-  const filename = `${recommendName}${ext}`
+  let filename = `${recommendName}${ext}`
+
+  // Check if in automation mode with subfolder (read from chrome.storage)
+  // @ts-expect-error - Automation mode flag
+  if (window.__AUTOMATION_MODE__) {
+    try {
+      const result = await chrome.storage.local.get('__AUTOMATION_SUBFOLDER__')
+      const subfolder = result['__AUTOMATION_SUBFOLDER__'] as
+        | string
+        | null
+        | undefined
+      if (subfolder) {
+        filename = `${subfolder}/${filename}`
+        console.log('[Automation] Using subfolder:', subfolder)
+      }
+    } catch (error) {
+      console.error('[Automation] Failed to read subfolder:', error)
+    }
+  }
 
   const toBlob = async () => {
     Toast.loading({
