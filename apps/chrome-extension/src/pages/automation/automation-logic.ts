@@ -139,8 +139,19 @@ export async function startBatchDownload(
     onLog('success', 'All pages already downloaded during discovery!')
   }
 
-  if (wikiPages.length > 1) {
+  onLog('info', `Wiki pages collected: ${wikiPages.length}`)
+
+  // Debug: log all wiki page titles
+  if (wikiPages.length > 0) {
+    console.log('[Manifest] Wiki pages for manifest:', wikiPages.map(p => ({ title: p.title, url: p.url })))
+  }
+
+  // Generate manifest if we have multiple wiki pages (including single page with sub-pages)
+  if (wikiPages.length >= 1) {
+    onLog('info', 'Generating wiki manifest files...')
     await generateAndDownloadManifest(wikiPages, urls[0], onLog)
+  } else {
+    onLog('info', 'No wiki pages found for manifest generation')
   }
 
   // Only run batch download for URLs not yet downloaded
@@ -357,33 +368,54 @@ async function downloadManifestFile(
   content: string,
   onLog: (level: 'info' | 'error' | 'success', message: string) => void
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
+  try {
+    onLog('info', `Creating manifest file: ${filename}`)
+
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
     const reader = new FileReader()
 
-    reader.onloadend = () => {
-      const dataUrl = reader.result as string
+    await new Promise<void>((resolve, reject) => {
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string
 
-      chrome.downloads.download(
-        {
-          url: dataUrl,
-          filename,
-          saveAs: false,
-        },
-        (downloadId) => {
-          if (chrome.runtime.lastError) {
-            reject(new Error(chrome.runtime.lastError.message))
-          } else if (downloadId) {
-            console.log('[Manifest] Downloaded:', filename)
-            resolve()
-          } else {
-            reject(new Error('Failed to download manifest'))
+        console.log(`[Manifest] Starting download: ${filename}, size: ${dataUrl.length} chars`)
+
+        chrome.downloads.download(
+          {
+            url: dataUrl,
+            filename,
+            saveAs: false,
+            conflictAction: 'uniquify',
+          },
+          (downloadId) => {
+            if (chrome.runtime.lastError) {
+              console.error('[Manifest] Download failed:', chrome.runtime.lastError)
+              reject(new Error(chrome.runtime.lastError.message))
+            } else if (downloadId) {
+              console.log(`[Manifest] Download started: ${filename}, ID: ${downloadId}`)
+              resolve()
+            } else {
+              console.error('[Manifest] Download failed: No download ID returned')
+              reject(new Error('Failed to download manifest'))
+            }
           }
-        }
-      )
-    }
+        )
+      }
 
-    reader.onerror = () => reject(reader.error)
-    reader.readAsDataURL(blob)
-  })
+      reader.onerror = () => {
+        console.error('[Manifest] FileReader error:', reader.error)
+        reject(reader.error)
+      }
+
+      reader.readAsDataURL(blob)
+    })
+
+    // Wait a moment for download to start
+    await new Promise(resolve => setTimeout(resolve, 500))
+
+    onLog('success', `✓ Downloaded: ${filename}`)
+  } catch (error) {
+    onLog('error', `✗ Failed to download ${filename}: ${error instanceof Error ? error.message : String(error)}`)
+    throw error
+  }
 }
