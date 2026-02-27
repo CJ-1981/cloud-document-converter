@@ -42,16 +42,26 @@ export async function startBatchDownload(
   const wikiPages: WikiPageInfo[] = [] // Track wiki pages for manifest
   const downloadedUrls = new Set<string>() // Track URLs already downloaded during discovery
 
-  // Get settings for subfolder preference
-  const settings = await getSettings([SettingKey.BatchDownloadSubfolder])
+  // Get settings for subfolder and nested folders preferences
+  const settings = await getSettings([
+    SettingKey.BatchDownloadSubfolder,
+    SettingKey.BatchDownloadNestedFolders,
+  ])
   const useSubfolder = settings[SettingKey.BatchDownloadSubfolder]
+  const useNestedFolders = settings[SettingKey.BatchDownloadNestedFolders]
 
   // Check if we're doing a wiki batch download (will determine subfolder after first wiki discovery)
   let subfolder: string | null = null
   const generateSubfolderIfNeeded = () => {
     if (useSubfolder && !subfolder) {
       subfolder = generateSubfolderName()
-      onLog('info', `📁 Files will be organized in subfolder: ${subfolder}`)
+      const folderInfo = useNestedFolders
+        ? ' (with wiki structure hierarchy)'
+        : ' (flat organization)'
+      onLog(
+        'info',
+        `📁 Files will be organized in subfolder: ${subfolder}${folderInfo}`,
+      )
     }
   }
 
@@ -96,7 +106,24 @@ export async function startBatchDownload(
                 'info',
                 `📥 Downloading during discovery: ${page.title || page.url}`,
               )
-              await downloadPageInTab(tabId, page, subfolder, onLog)
+
+              // Pre-calculate filename with nested path if enabled
+              const nestedFilename = useNestedFolders
+                ? generateFilename(
+                    page,
+                    wikiPages.length,
+                    useNestedFolders,
+                    wikiPages,
+                  )
+                : null
+
+              await downloadPageInTab(
+                tabId,
+                page,
+                subfolder,
+                nestedFilename,
+                onLog,
+              )
               downloadedUrls.add(page.url)
             },
           },
@@ -191,6 +218,7 @@ export async function startBatchDownload(
       wikiPages,
       urls[0] || '',
       subfolder,
+      useNestedFolders,
       onLog,
     )
   } else {
@@ -251,14 +279,24 @@ async function downloadPageInTab(
   tabId: number,
   page: WikiPageInfo,
   subfolder: string | null,
+  nestedFilename: string | null,
   onLog: (level: 'info' | 'error' | 'success', message: string) => void,
 ): Promise<void> {
   try {
-    // Store subfolder in chrome.storage for the download script to read
+    // Store subfolder and nested filename in chrome.storage for the download script to read
     if (subfolder) {
       await chrome.storage.local.set({ __AUTOMATION_SUBFOLDER__: subfolder })
     } else {
       await chrome.storage.local.remove('__AUTOMATION_SUBFOLDER__')
+    }
+
+    // Store nested filename if provided (this is the full relative path including nested folders)
+    if (nestedFilename) {
+      await chrome.storage.local.set({
+        __AUTOMATION_NESTED_FILENAME__: nestedFilename,
+      })
+    } else {
+      await chrome.storage.local.remove('__AUTOMATION_NESTED_FILENAME__')
     }
 
     // Set automation flag
@@ -369,13 +407,14 @@ async function generateAndDownloadManifest(
   pages: WikiPageInfo[],
   rootUrl: string,
   subfolder: string | null,
+  useNestedFolders: boolean,
   onLog: (level: 'info' | 'error' | 'success', message: string) => void,
 ): Promise<void> {
   try {
     // Assign filenames to pages
     const pagesWithFilenames = pages.map((page, index) => ({
       ...page,
-      downloadFilename: generateFilename(page, index),
+      downloadFilename: generateFilename(page, index, useNestedFolders, pages),
       index,
     }))
 

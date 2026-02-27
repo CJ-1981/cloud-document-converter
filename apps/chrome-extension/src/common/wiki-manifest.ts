@@ -34,7 +34,8 @@ export function generateMarkdownManifest(manifest: WikiManifest): string {
 
   manifest.pages.forEach((page, index) => {
     const depthIndicator = '  '.repeat(page.depth)
-    const filename = page.downloadFilename ?? `${String((page.index ?? index) + 1)}.md`
+    const filename =
+      page.downloadFilename ?? `${String((page.index ?? index) + 1)}.md`
     const title = page.title ?? 'Untitled'
     const url = shortenUrl(page.url)
 
@@ -64,7 +65,8 @@ export function generateCSVManifest(manifest: WikiManifest): string {
   lines.push('#,Filename,Title,Depth,Parent URL,URL')
 
   manifest.pages.forEach((page, index) => {
-    const filename = page.downloadFilename ?? `${String((page.index ?? index) + 1)}.md`
+    const filename =
+      page.downloadFilename ?? `${String((page.index ?? index) + 1)}.md`
     const title = (page.title ?? 'Untitled').replace(/"/g, '""') // Escape quotes
     const url = page.url
     const parentUrl = page.parentUrl ?? ''
@@ -162,17 +164,64 @@ function shortenUrl(url: string): string {
 
 /**
  * Generate filename for a page
+ * If useNestedFolders is true, generates nested path based on wiki hierarchy
  */
-export function generateFilename(page: WikiPageInfo, index: number): string {
+export function generateFilename(
+  page: WikiPageInfo,
+  index: number,
+  useNestedFolders = false,
+  allPages: WikiPageInfo[] = [],
+): string {
   if (page.title) {
     // Use title, sanitize it
     const sanitized = page.title
-      .replace(/[<>:"/\\|?*]/g, '-') // Remove invalid chars
+      .replace(/[<>:"\\|?*]/g, '-') // Remove invalid chars (keep / for paths)
       .replace(/\s+/g, '_') // Spaces to underscores
+      .replace(/\/+/g, '/') // Normalize multiple slashes
       .substring(0, 100) // Limit length
+      .replace(/^\/+|\/+$/g, '') // Trim leading/trailing slashes
+
+    if (useNestedFolders && page.depth > 0) {
+      // Build nested path based on parent hierarchy
+      const pathParts = buildNestedPath(page, allPages)
+      return pathParts.length > 0
+        ? `${pathParts.join('/')}/${sanitized}.md`
+        : `${sanitized}.md`
+    }
 
     return `${sanitized}.md`
   }
 
-  return `page_${index + 1}.md`
+  return `page_${String(index + 1)}.md`
+}
+
+/**
+ * Build nested path for a page by traversing its parent hierarchy
+ */
+function buildNestedPath(
+  page: WikiPageInfo,
+  allPages: WikiPageInfo[],
+): string[] {
+  const pathParts: string[] = []
+  let currentPage = page
+
+  // Traverse up the parent chain
+  while (currentPage.parentUrl && currentPage.depth > 0) {
+    const parentPage = allPages.find(p => p.url === currentPage.parentUrl)
+    if (!parentPage) break
+
+    // Add parent's sanitized name to path (in reverse order)
+    if (parentPage.title) {
+      const sanitized = parentPage.title
+        .replace(/[<>:"\\|?*]/g, '-')
+        .replace(/\s+/g, '_')
+        .substring(0, 50) // Shorter limit for folder names
+
+      pathParts.unshift(sanitized)
+    }
+
+    currentPage = parentPage
+  }
+
+  return pathParts
 }

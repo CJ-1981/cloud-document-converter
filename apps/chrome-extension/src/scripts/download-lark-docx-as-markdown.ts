@@ -573,17 +573,35 @@ const main = async (options: { signal?: AbortSignal } = {}) => {
   // @ts-expect-error - Automation mode flag
   if (window.__AUTOMATION_MODE__) {
     try {
-      const result = await chrome.storage.local.get('__AUTOMATION_SUBFOLDER__')
+      const result = await chrome.storage.local.get([
+        '__AUTOMATION_SUBFOLDER__',
+        '__AUTOMATION_NESTED_FILENAME__',
+      ])
+
       const subfolder = result['__AUTOMATION_SUBFOLDER__'] as
         | string
         | null
         | undefined
-      if (subfolder) {
+      const nestedFilename = result['__AUTOMATION_NESTED_FILENAME__'] as
+        | string
+        | null
+        | undefined
+
+      // Use nested filename if available (already includes full relative path)
+      if (nestedFilename) {
+        filename = nestedFilename
+        // Add subfolder prefix if also present
+        if (subfolder) {
+          filename = `${subfolder}/${filename}`
+        }
+        console.log('[Automation] Using nested filename:', nestedFilename)
+      } else if (subfolder) {
+        // Just use subfolder with regular filename
         filename = `${subfolder}/${filename}`
         console.log('[Automation] Using subfolder:', subfolder)
       }
     } catch (error) {
-      console.error('[Automation] Failed to read subfolder:', error)
+      console.error('[Automation] Failed to read storage:', error)
     }
   }
 
