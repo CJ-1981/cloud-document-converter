@@ -155,21 +155,29 @@ export function discoverWikiSubPagesCode(): string {
   `
 }
 
+export interface WikiPageInfo {
+  url: string
+  title?: string
+  depth: number
+  parentUrl?: string
+}
+
 export interface WikiDiscoveryOptions {
   maxDepth?: number
   onProgress?: (currentDepth: number, totalUrls: number) => void
 }
 
 /**
- * Discover wiki sub-pages recursively
+ * Discover wiki sub-pages recursively with page info
  */
 export async function discoverWikiRecursively(
   url: string,
   maxDepth: number = Infinity,
   currentDepth: number = 0,
   visited: Set<string> = new Set(),
-  options: WikiDiscoveryOptions = {}
-): Promise<string[]> {
+  options: WikiDiscoveryOptions = {},
+  parentUrl?: string
+): Promise<WikiPageInfo[]> {
   // Normalize URL for deduplication
   let normalizedUrl: string
   try {
@@ -194,6 +202,22 @@ export async function discoverWikiRecursively(
     // Wait for page to load
     await waitForPageLoad(tab.id!)
 
+    // Get the page title
+    const titleResults = await chrome.scripting.executeScript({
+      target: { tabId: tab.id! },
+      func: () => {
+        // Try to get title from Lark's global state
+        // @ts-expect-error - Lark global
+        if (window.PageMain?.blockManager?.rootBlockModel?.title) {
+          // @ts-expect-error - Lark global
+          return window.PageMain.blockManager.rootBlockModel.title
+        }
+        return document.title
+      },
+    })
+
+    const pageTitle = titleResults[0]?.result as string | undefined
+
     // Execute script to discover sub-pages
     const results = await chrome.scripting.executeScript({
       target: { tabId: tab.id! },
@@ -203,6 +227,14 @@ export async function discoverWikiRecursively(
     const subPages = (results[0]?.result as string[]) || []
 
     console.log(`[Wiki Discovery] Depth ${currentDepth}: Found ${subPages.length} sub-pages from ${normalizedUrl}`)
+
+    // Create page info for current page
+    const currentPageInfo: WikiPageInfo = {
+      url: normalizedUrl,
+      title: pageTitle,
+      depth: currentDepth,
+      parentUrl: parentUrl,
+    }
 
     // Filter out the current page and already visited URLs
     const newSubPages = subPages.filter(u => {
@@ -215,7 +247,7 @@ export async function discoverWikiRecursively(
     options.onProgress?.(currentDepth, visited.size)
 
     // Recursively discover nested sub-pages (with depth limit to prevent infinite loops)
-    const allUrls: string[] = [normalizedUrl]
+    const allPages: WikiPageInfo[] = [currentPageInfo]
 
     // Limit recursion depth to prevent issues
     const MAX_SUB_PAGES_PER_LEVEL = 50
@@ -229,16 +261,21 @@ export async function discoverWikiRecursively(
           maxDepth,
           currentDepth + 1,
           visited,
-          options
+          options,
+          normalizedUrl // Current page is the parent
         )
-        allUrls.push(...nested)
+        allPages.push(...nested)
       } else {
         // Just add the sub-page without recursing
-        allUrls.push(subPage)
+        allPages.push({
+          url: subPage,
+          depth: currentDepth + 1,
+          parentUrl: normalizedUrl,
+        })
       }
     }
 
-    return Array.from(new Set(allUrls))
+    return allPages
   } finally {
     await chrome.tabs.remove(tab.id!)
   }
