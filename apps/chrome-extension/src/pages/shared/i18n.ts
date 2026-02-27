@@ -33,6 +33,13 @@ export const i18n = createI18n({
       'general.flat_grid': 'Flat Column Layout',
       'download.file_with_unique_name':
         'Use UUID for image and diagram filenames',
+      'download.batch_subfolder': 'Organize batch downloads in subfolder',
+      'download.batch_subfolder.description':
+        'Create a timestamped subfolder in Downloads for batch wiki downloads (e.g., wiki-export-2026-02-27-143022/)',
+      'download.batch_nested_folders':
+        'Mirror wiki structure with nested folders',
+      'download.batch_nested_folders.description':
+        'Create folder hierarchy matching wiki page parent-child relationships (requires subfolder enabled)',
       'download.method': 'Download Method',
       'download.method.placeholder': 'Select download method',
       'download.method.direct': 'Direct Download',
@@ -69,6 +76,12 @@ export const i18n = createI18n({
       'general.text_highlight': '保留文本高亮（字体颜色、字体背景颜色）',
       'general.flat_grid': '扁平分栏',
       'download.file_with_unique_name': '图片和图表文件使用 UUID 命名',
+      'download.batch_subfolder': '批量下载时使用子文件夹组织',
+      'download.batch_subfolder.description':
+        '在下载文件夹中创建带时间戳的子文件夹用于批量下载（例如：wiki-export-2026-02-27-143022/）',
+      'download.batch_nested_folders': '按照知识库结构创建嵌套文件夹',
+      'download.batch_nested_folders.description':
+        '根据知识库页面的父子关系创建文件夹层级（需要启用子文件夹）',
       'download.method': '下载方式',
       'download.method.placeholder': '选择下载方式',
       'download.method.direct': '直接下载',

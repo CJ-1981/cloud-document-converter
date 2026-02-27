@@ -25,7 +25,9 @@ export const useSettings = <
     | SettingKey.TableWithNonPhrasingContent
     | SettingKey.TextHighlight
     | SettingKey.DownloadFileWithUniqueName
-    | SettingKey.FlatGrid,
+    | SettingKey.FlatGrid
+    | SettingKey.BatchDownloadSubfolder
+    | SettingKey.BatchDownloadNestedFolders,
 >(
   options: { keys?: Key[] } = {},
 ): {
@@ -46,6 +48,8 @@ export const useSettings = <
       SettingKey.TextHighlight,
       SettingKey.DownloadFileWithUniqueName,
       SettingKey.FlatGrid,
+      SettingKey.BatchDownloadSubfolder,
+      SettingKey.BatchDownloadNestedFolders,
     ] as Key[],
   } = options
 

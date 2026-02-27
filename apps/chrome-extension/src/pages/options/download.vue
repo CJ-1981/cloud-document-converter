@@ -34,6 +34,8 @@ const { t } = useI18n()
 const schema = z.object({
   [SettingKey.DownloadMethod]: z.enum(DownloadMethod),
   [SettingKey.DownloadFileWithUniqueName]: z.boolean(),
+  [SettingKey.BatchDownloadSubfolder]: z.boolean(),
+  [SettingKey.BatchDownloadNestedFolders]: z.boolean(),
 })
 
 const { query, mutation } = useSettings()
@@ -49,6 +51,8 @@ watch(query.data, newValues => {
       values: pick(newValues, [
         SettingKey.DownloadMethod,
         SettingKey.DownloadFileWithUniqueName,
+        SettingKey.BatchDownloadSubfolder,
+        SettingKey.BatchDownloadNestedFolders,
       ]),
     })
   }
@@ -136,6 +140,56 @@ const downloadMethodDescription = computed(() => {
             <Switch
               v-else
               id="form-vee-download-file-with-unique-name"
+              :name="field.name"
+              :model-value="field.value"
+              :aria-invalid="!!errors.length"
+              @update:model-value="field.onChange"
+            />
+          </Field>
+        </VeeField>
+        <VeeField
+          v-slot="{ field, errors }"
+          :name="`[${SettingKey.BatchDownloadSubfolder}]`"
+        >
+          <Field orientation="horizontal" :data-invalid="!!errors.length">
+            <FieldContent>
+              <FieldLabel for="form-vee-batch-subfolder">{{
+                t('download.batch_subfolder')
+              }}</FieldLabel>
+              <FieldDescription>
+                {{ t('download.batch_subfolder.description') }}
+              </FieldDescription>
+              <FieldError v-if="errors.length" :errors="errors" />
+            </FieldContent>
+            <Skeleton v-if="query.isPending.value" class="h-9 w-40" />
+            <Switch
+              v-else
+              id="form-vee-batch-subfolder"
+              :name="field.name"
+              :model-value="field.value"
+              :aria-invalid="!!errors.length"
+              @update:model-value="field.onChange"
+            />
+          </Field>
+        </VeeField>
+        <VeeField
+          v-slot="{ field, errors }"
+          :name="`[${SettingKey.BatchDownloadNestedFolders}]`"
+        >
+          <Field orientation="horizontal" :data-invalid="!!errors.length">
+            <FieldContent>
+              <FieldLabel for="form-vee-batch-nested">{{
+                t('download.batch_nested_folders')
+              }}</FieldLabel>
+              <FieldDescription>
+                {{ t('download.batch_nested_folders.description') }}
+              </FieldDescription>
+              <FieldError v-if="errors.length" :errors="errors" />
+            </FieldContent>
+            <Skeleton v-if="query.isPending.value" class="h-9 w-40" />
+            <Switch
+              v-else
+              id="form-vee-batch-nested"
               :name="field.name"
               :model-value="field.value"
               :aria-invalid="!!errors.length"
