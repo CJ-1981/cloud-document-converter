@@ -346,7 +346,7 @@ function waitForDownloadComplete(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const CHECK_INTERVAL = 200
-    const MAX_WAIT = 5000
+    const MAX_WAIT = timeout
     let elapsedTime = 0
 
     const checkForDownload = async () => {
@@ -356,7 +356,7 @@ function waitForDownloadComplete(
             chrome.downloads.search(
               {
                 orderBy: ['-startTime'],
-                limit: 20,
+                limit: 50,
               },
               result => resolve(result),
             )
@@ -364,39 +364,88 @@ function waitForDownloadComplete(
         )
 
         if (results) {
-          const ourDownload = results.find(
+          // Look for downloads that started after our start time (with a wider window)
+          const ourDownloads = results.filter(
             d =>
               d.startTime &&
-              d.startTime >= startTime - 1000 &&
-              d.startTime <= Date.now(),
+              d.startTime >= startTime - 2000 &&
+              d.startTime <= Date.now() + 1000,
           )
 
-          if (ourDownload) {
-            if (ourDownload.state === 'complete') {
+          if (ourDownloads.length > 0) {
+            const download = ourDownloads[0]
+
+            if (download.state === 'complete') {
+              console.log('[Download] Download completed:', {
+                id: download.id,
+                filename: download.filename,
+              })
               resolve()
               return
-            } else if (ourDownload.error) {
-              reject(new Error(`Download error: ${ourDownload.error}`))
+            } else if (download.state === 'interrupted') {
+              const errorMsg =
+                download.error || download.paused?.userCanceled
+                  ? 'User canceled'
+                  : 'Download interrupted'
+              console.error('[Download] Failed:', errorMsg)
+              reject(new Error(`Download failed: ${errorMsg}`))
+              return
+            } else if (download.error) {
+              console.error('[Download] Error:', download.error)
+              reject(new Error(`Download error: ${download.error}`))
               return
             }
           }
         }
       } catch (error) {
-        // Ignore errors, try again
+        console.error('[Download] Check error:', error)
       }
 
       elapsedTime += CHECK_INTERVAL
       if (elapsedTime >= MAX_WAIT) {
-        // Assume success after max wait
-        resolve()
+        // After waiting, check one more time for any recent download
+        chrome.downloads.search(
+          {
+            orderBy: ['-startTime'],
+            limit: 5,
+          },
+          results => {
+            const recentDownload = results?.find(
+              d =>
+                d.startTime &&
+                d.startTime >= startTime - 3000 &&
+                d.startTime <= Date.now() + 1000,
+            )
+
+            if (recentDownload) {
+              if (recentDownload.state === 'complete') {
+                console.log('[Download] Download completed (late check):', {
+                  id: recentDownload.id,
+                  filename: recentDownload.filename,
+                })
+                resolve()
+              } else if (recentDownload.error) {
+                reject(new Error(`Download error: ${recentDownload.error}`))
+              } else {
+                // Still in progress, assume it will complete
+                console.log('[Download] Download in progress, assuming success')
+                resolve()
+              }
+            } else {
+              // No download found at all - this is an error
+              console.error('[Download] No download found')
+              reject(new Error('Download failed: No download initiated'))
+            }
+          },
+        )
         return
       }
 
       setTimeout(checkForDownload, CHECK_INTERVAL)
     }
 
-    // Start checking
-    setTimeout(checkForDownload, 500)
+    // Start checking after a short delay to allow download to initiate
+    setTimeout(checkForDownload, 300)
   })
 }
 
